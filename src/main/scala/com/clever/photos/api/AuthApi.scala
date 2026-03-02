@@ -3,7 +3,7 @@ package com.clever.photos.api
 import com.clever.photos.auth.AuthService
 import com.clever.photos.domain.TokenResponse
 import sttp.model.StatusCode
-import sttp.tapir.*
+import sttp.tapir.{PublicEndpoint, AnyEndpoint}
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.ztapir.*

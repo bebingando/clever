@@ -4,10 +4,7 @@ import com.clever.photos.api.*
 import com.clever.photos.auth.*
 import com.clever.photos.domain.*
 import com.clever.photos.repository.*
-import sttp.client3.*
-import sttp.client3.testing.SttpBackendStub
 import sttp.model.StatusCode
-import sttp.tapir.server.stub.TapirStubInterpreter
 import zio.*
 import zio.json.*
 import zio.test.*

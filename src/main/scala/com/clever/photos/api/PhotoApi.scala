@@ -2,9 +2,9 @@ package com.clever.photos.api
 
 import com.clever.photos.auth.AuthService
 import com.clever.photos.domain.*
-import com.clever.photos.repository.PhotoRepository
+import com.clever.photos.repository.{PhotoRepository, PhotographerRepository}
 import sttp.model.StatusCode
-import sttp.tapir.*
+import sttp.tapir.AnyEndpoint
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.ztapir.*
@@ -94,26 +94,26 @@ object PhotoApi:
     AuthService.validateToken(token).mapError(authErrorToHttp)
 
   val listPhotosServer: ZServerEndpoint[Env, Any] =
-    listPhotosEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims =>
-      case (photographerId, alt, width, height, minWidth, minHeight, avgColor, page, perPage) =>
-        for
-          _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosRead))
-                   .mapError(authErrorToHttp)
-          perPageClamped = perPage.min(100).max(1)
-          q = PhotoQuery(
-                photographerId = photographerId,
-                alt            = alt,
-                width          = width,
-                height         = height,
-                minWidth       = minWidth,
-                minHeight      = minHeight,
-                avgColor       = avgColor,
-                page           = page.max(1),
-                perPage        = perPageClamped
-              )
-          (rows, total) <- ZIO.serviceWithZIO[PhotoRepository](_.findAll(q))
-                               .mapError(throwableToHttp)
-        yield PagedResponse(rows, PaginationMeta(total, q.page, q.perPage))
+    listPhotosEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims => input =>
+      val (photographerId, alt, width, height, minWidth, minHeight, avgColor, page, perPage) = input
+      for
+        _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosRead))
+                 .mapError(authErrorToHttp)
+        perPageClamped = perPage.min(100).max(1)
+        q = PhotoQuery(
+              photographerId = photographerId,
+              alt            = alt,
+              width          = width,
+              height         = height,
+              minWidth       = minWidth,
+              minHeight      = minHeight,
+              avgColor       = avgColor,
+              page           = page.max(1),
+              perPage        = perPageClamped
+            )
+        (rows, total) <- ZIO.serviceWithZIO[PhotoRepository](_.findAll(q))
+                             .mapError(throwableToHttp)
+      yield PagedResponse(rows, PaginationMeta(total, q.page, q.perPage))
     }
 
   val getPhotoServer: ZServerEndpoint[Env, Any] =
@@ -169,41 +169,41 @@ object PhotoApi:
     }
 
   val replacePhotoServer: ZServerEndpoint[Env, Any] =
-    replacePhotoEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims =>
-      case (photoId, body) =>
-        for
-          _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosWrite))
-                   .mapError(authErrorToHttp)
-          _ <- ZIO.unless(body.avgColor.matches("^#[0-9A-Fa-f]{6}$"))(
+    replacePhotoEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims => input =>
+      val (photoId, body) = input
+      for
+        _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosWrite))
+                 .mapError(authErrorToHttp)
+        _ <- ZIO.unless(body.avgColor.matches("^#[0-9A-Fa-f]{6}$"))(
                    ZIO.fail(StatusCode.UnprocessableEntity -> ErrorResponse(
                      s"avgColor must match #RRGGBB format"
                    ))
                  )
-          r <- ZIO.serviceWithZIO[PhotoRepository](_.replace(photoId, body))
-                   .mapError(throwableToHttp)
-          p <- ZIO.fromOption(r)
-                   .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
-        yield p
+        r <- ZIO.serviceWithZIO[PhotoRepository](_.replace(photoId, body))
+                 .mapError(throwableToHttp)
+        p <- ZIO.fromOption(r)
+                 .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
+      yield p
     }
 
   val patchPhotoServer: ZServerEndpoint[Env, Any] =
-    patchPhotoEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims =>
-      case (photoId, body) =>
-        for
-          _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosWrite))
-                   .mapError(authErrorToHttp)
-          _ <- body.avgColor.fold(ZIO.unit)(c =>
+    patchPhotoEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims => input =>
+      val (photoId, body) = input
+      for
+        _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosWrite))
+                 .mapError(authErrorToHttp)
+        _ <- body.avgColor.fold(ZIO.unit)(c =>
                  ZIO.unless(c.matches("^#[0-9A-Fa-f]{6}$"))(
                    ZIO.fail(StatusCode.UnprocessableEntity -> ErrorResponse(
                      s"avgColor must match #RRGGBB format"
                    ))
                  )
                )
-          r <- ZIO.serviceWithZIO[PhotoRepository](_.patch(photoId, body))
-                   .mapError(throwableToHttp)
-          p <- ZIO.fromOption(r)
-                   .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
-        yield p
+        r <- ZIO.serviceWithZIO[PhotoRepository](_.patch(photoId, body))
+                 .mapError(throwableToHttp)
+        p <- ZIO.fromOption(r)
+                 .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
+      yield p
     }
 
   val deletePhotoServer: ZServerEndpoint[Env, Any] =

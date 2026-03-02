@@ -98,10 +98,10 @@ object PhotoRepositorySpec extends ZIOSpecDefault:
   private val seededLayer: ULayer[PhotoRepository] =
     ZLayer.fromZIO {
       val repo = new InMemoryPhotoRepository
-      ZIO.succeed(photo1) >>= repo.create >>
-      ZIO.succeed(photo2) >>= repo.create >>
-      ZIO.succeed(photo3) >>= repo.create >>
-      ZIO.succeed(repo)
+      (repo.create(photo1) *>
+       repo.create(photo2) *>
+       repo.create(photo3)).orDie *>
+      ZIO.succeed[PhotoRepository](repo)
     }
 
   // ─── Tests ────────────────────────────────────────────────────────────────

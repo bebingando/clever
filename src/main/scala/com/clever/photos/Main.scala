@@ -55,13 +55,7 @@ object Main extends ZIOAppDefault:
       Scope.default
     )
 
-  private val program: ZIO[
-    AppConfig & DbConfig & HttpConfig & AuthConfig & IngestConfig &
-    DefaultClientConfig & PhotoRepository & PhotographerRepository &
-    ApiClientRepository & AuthService & Scope,
-    Throwable,
-    Nothing
-  ] =
+  private val program =
     for
       appCfg <- ZIO.service[AppConfig]
 

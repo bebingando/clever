@@ -1,6 +1,7 @@
 package com.clever.photos.repository
 
 import com.clever.photos.domain.*
+import cats.syntax.apply.*
 import doobie.*
 import doobie.implicits.*
 import doobie.postgres.implicits.*

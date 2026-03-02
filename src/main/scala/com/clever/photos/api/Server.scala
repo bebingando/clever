@@ -31,23 +31,15 @@ object Server:
         "1.0.0"
       )
 
-  /** All server-side endpoints combined (business logic + Swagger UI). */
-  private val allServerEndpoints
-    : List[sttp.tapir.server.ServerEndpoint[Any, RIO[AppEnv, *]]] =
-    (AuthApi.serverEndpoints ++
-      PhotoApi.serverEndpoints ++
-      PhotographerApi.serverEndpoints)
-      .map(_.asInstanceOf[sttp.tapir.server.ServerEndpoint[Any, RIO[AppEnv, *]]]) ++
-    swaggerEndpoints.map(
-      _.asInstanceOf[sttp.tapir.server.ServerEndpoint[Any, RIO[AppEnv, *]]]
-    )
-
   /** Starts the ZIO-HTTP server and blocks until the application shuts down. */
   def start(config: HttpConfig): ZIO[AppEnv & Scope, Throwable, Nothing] =
-    val routes = ZioHttpInterpreter().toHttp(allServerEndpoints)
+    val authRoutes         = ZioHttpInterpreter().toHttp(AuthApi.serverEndpoints)
+    val photoRoutes        = ZioHttpInterpreter().toHttp(PhotoApi.serverEndpoints)
+    val photographerRoutes = ZioHttpInterpreter().toHttp(PhotographerApi.serverEndpoints)
+    val swaggerRoutes      = ZioHttpInterpreter().toHttp(swaggerEndpoints)
+    val routes             = authRoutes ++ photoRoutes ++ photographerRoutes ++ swaggerRoutes
     val serverConfig = zio.http.Server.Config.default
       .binding(config.host, config.port)
-    zio.http.Server.serve(routes).provide(
-      ZLayer.succeed(serverConfig),
-      zio.http.Server.live
+    zio.http.Server.serve(routes).provideSomeLayer[AppEnv](
+      ZLayer.succeed(serverConfig) >>> zio.http.Server.live
     )
