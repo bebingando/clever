@@ -1,0 +1,9 @@
+target/
+.bsp/
+.metals/
+.idea/
+*.class
+*.jar
+.DS_Store
+.env
+*.env.local
