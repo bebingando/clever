@@ -1,5 +1,5 @@
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM sbt:1.10.0-jdk21 AS builder
+FROM --platform=linux/amd64 sbtscala/scala-sbt:eclipse-temurin-jammy-21.0.2_13_1.10.0_3.4.1 AS builder
 
 WORKDIR /build
 
