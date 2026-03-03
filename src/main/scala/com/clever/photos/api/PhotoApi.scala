@@ -2,13 +2,15 @@ package com.clever.photos.api
 
 import com.clever.photos.auth.AuthService
 import com.clever.photos.domain.*
-import com.clever.photos.repository.{PhotoRepository, PhotographerRepository}
+import com.clever.photos.repository.PhotoRepository
 import sttp.model.StatusCode
 import sttp.tapir.AnyEndpoint
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.ztapir.*
 import zio.*
+
+import ApiSecurity.{securedBase, authenticate}
 
 /** All REST endpoints for the /photos resource.
   *
@@ -21,14 +23,6 @@ import zio.*
   *        then checks the required scope.
   */
 object PhotoApi:
-
-  // ─── Shared security input ─────────────────────────────────────────────────
-
-  /** Base endpoint that validates the Bearer JWT and yields TokenClaims. */
-  private val securedBase =
-    endpoint
-      .securityIn(auth.bearer[String]().description("JWT access token from POST /auth/token"))
-      .errorOut(statusCode.and(jsonBody[ErrorResponse]))
 
   // ─── Endpoint definitions (abstract — no server logic) ────────────────────
 
@@ -91,9 +85,6 @@ object PhotoApi:
   // Use the shared AppEnv so all server endpoints share the same R.
   type Env = AppEnv
 
-  private def authenticate(token: String): ZIO[AuthService, (StatusCode, ErrorResponse), TokenClaims] =
-    AuthService.validateToken(token).mapError(authErrorToHttp)
-
   val listPhotosServer: ZServerEndpoint[Env, Any] =
     listPhotosEndpoint.zServerSecurityLogic(authenticate).serverLogic { claims => input =>
       val (photographerId, alt, width, height, minWidth, minHeight, avgColor, page, perPage) = input
@@ -112,8 +103,7 @@ object PhotoApi:
               page           = page.max(1),
               perPage        = perPageClamped
             )
-        (rows, total) <- ZIO.serviceWithZIO[PhotoRepository](_.findAll(q))
-                             .mapError(throwableToHttp)
+        (rows, total) <- ZIO.serviceWithZIO[PhotoRepository](_.findAll(q)).mapErrorHttp
       yield PagedResponse(rows, PaginationMeta(total, q.page, q.perPage))
     }
 
@@ -122,8 +112,7 @@ object PhotoApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosRead))
                  .mapError(authErrorToHttp)
-        r <- ZIO.serviceWithZIO[PhotoRepository](_.findById(photoId))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotoRepository](_.findById(photoId)).mapErrorHttp
         p <- ZIO.fromOption(r)
                  .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
       yield p
@@ -146,14 +135,7 @@ object PhotoApi:
                    "width and height must be positive integers"
                  ))
                )
-        // Validate photographer exists
-        pgExists <- ZIO.serviceWithZIO[PhotographerRepository](_.existsById(body.photographerId))
-                        .mapError(throwableToHttp)
-        _ <- ZIO.unless(pgExists)(
-                 ZIO.fail(StatusCode.Conflict -> ErrorResponse(
-                   s"Photographer not found: ${body.photographerId}"
-                 ))
-               )
+        // FK constraint on photographer_id is enforced by the DB (PSQLException 23503 → 409).
         photo = Photo(
                   id             = body.id,
                   photographerId = body.photographerId,
@@ -164,8 +146,7 @@ object PhotoApi:
                   avgColor       = body.avgColor,
                   alt            = body.alt
                 )
-        created <- ZIO.serviceWithZIO[PhotoRepository](_.create(photo))
-                       .mapError(throwableToHttp)
+        created <- ZIO.serviceWithZIO[PhotoRepository](_.create(photo)).mapErrorHttp
       yield created
     }
 
@@ -180,8 +161,7 @@ object PhotoApi:
                      s"avgColor must match #RRGGBB format"
                    ))
                  )
-        r <- ZIO.serviceWithZIO[PhotoRepository](_.replace(photoId, body))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotoRepository](_.replace(photoId, body)).mapErrorHttp
         p <- ZIO.fromOption(r)
                  .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
       yield p
@@ -200,8 +180,7 @@ object PhotoApi:
                    ))
                  )
                )
-        r <- ZIO.serviceWithZIO[PhotoRepository](_.patch(photoId, body))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotoRepository](_.patch(photoId, body)).mapErrorHttp
         p <- ZIO.fromOption(r)
                  .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
       yield p
@@ -212,8 +191,7 @@ object PhotoApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosDelete))
                  .mapError(authErrorToHttp)
-        deleted <- ZIO.serviceWithZIO[PhotoRepository](_.delete(photoId))
-                       .mapError(throwableToHttp)
+        deleted <- ZIO.serviceWithZIO[PhotoRepository](_.delete(photoId)).mapErrorHttp
         _ <- ZIO.unless(deleted)(
                  ZIO.fail(StatusCode.NotFound -> ErrorResponse(s"Photo not found: $photoId"))
                )

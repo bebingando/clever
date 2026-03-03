@@ -57,18 +57,19 @@ object PhotoReplace:
 
 /** Sparse update body for PATCH /photos/:id.
   * Only fields present in the JSON body are updated; absent fields are left
-  * unchanged.  Because `alt` is nullable, `None` here means "do not touch
-  * this field", while `Some(None)` would mean "clear the alt text".
-  * We model this with a simple `Option[String]` and document that sending
-  * `null` in JSON clears the field, while omitting the key leaves it alone.
+  * unchanged.  `alt` uses `Option[Option[String]]` to distinguish three states:
+  *   - absent key           → `None`        (do not touch this field)
+  *   - `"alt": null`        → `Some(None)`  (clear alt text to NULL)
+  *   - `"alt": "some text"` → `Some(Some("some text"))` (set new value)
+  * zio-json auto-derivation handles this correctly.
   */
 final case class PhotoPatch(
-  width:        Option[Int]    = None,
-  height:       Option[Int]    = None,
-  pexelsUrl:    Option[String] = None,
-  baseImageUrl: Option[String] = None,
-  avgColor:     Option[String] = None,
-  alt:          Option[String] = None
+  width:        Option[Int]            = None,
+  height:       Option[Int]            = None,
+  pexelsUrl:    Option[String]         = None,
+  baseImageUrl: Option[String]         = None,
+  avgColor:     Option[String]         = None,
+  alt:          Option[Option[String]] = None
 )
 
 object PhotoPatch:

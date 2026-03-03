@@ -23,11 +23,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER DEFAULT PRIVILEGES IN SCHEMA public
         GRANT USAGE, SELECT                  ON SEQUENCES TO app_user;
 
-    -- Read-only role placeholder (for future replica support)
-    CREATE ROLE readonly_user WITH LOGIN PASSWORD 'readonly_placeholder';
+    -- Read-only role (for replica/reporting access); password injected from env
+    CREATE ROLE readonly_user WITH LOGIN PASSWORD '${READONLY_DB_PASSWORD}';
     GRANT CONNECT ON DATABASE photos_db   TO readonly_user;
     GRANT USAGE   ON SCHEMA public        TO readonly_user;
     GRANT SELECT  ON ALL TABLES IN SCHEMA public TO readonly_user;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    -- FOR ROLE app_user: Flyway creates tables as app_user, so future tables
+    -- are owned by app_user. This ensures readonly_user gets SELECT on them.
+    ALTER DEFAULT PRIVILEGES FOR ROLE app_user IN SCHEMA public
         GRANT SELECT ON TABLES TO readonly_user;
 EOSQL

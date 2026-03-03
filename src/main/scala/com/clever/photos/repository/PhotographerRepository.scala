@@ -1,7 +1,7 @@
 package com.clever.photos.repository
 
 import com.clever.photos.domain.*
-import cats.syntax.apply.*
+import cats.syntax.applicative.*
 import doobie.*
 import doobie.implicits.*
 import zio.*
@@ -18,11 +18,17 @@ trait PhotographerRepository:
 
 final class LivePhotographerRepository(xa: Transactor[Task]) extends PhotographerRepository:
 
-  def findById(id: Long): Task[Option[Photographer]] =
+  // ─── Private ConnectionIO helpers (not yet transacted) ──────────────────
+
+  private def findByIdIO(id: Long): ConnectionIO[Option[Photographer]] =
     sql"SELECT photographer_id, name, profile_url FROM photographers WHERE photographer_id = $id"
       .query[Photographer]
       .option
-      .transact(xa)
+
+  // ─── Public Task methods ─────────────────────────────────────────────────
+
+  def findById(id: Long): Task[Option[Photographer]] =
+    findByIdIO(id).transact(xa)
 
   def findAll(q: PhotographerQuery): Task[(List[Photographer], Long)] =
     val base    = fr"FROM photographers WHERE 1=1"
@@ -49,15 +55,11 @@ final class LivePhotographerRepository(xa: Transactor[Task]) extends Photographe
       .as(p)
 
   def replace(id: Long, r: PhotographerReplace): Task[Option[Photographer]] =
-    sql"""UPDATE photographers SET name = ${r.name}, profile_url = ${r.profileUrl}
-          WHERE photographer_id = $id"""
-      .update
-      .run
-      .transact(xa)
-      .flatMap {
-        case 0 => ZIO.succeed(None)
-        case _ => findById(id)
-      }
+    (for
+      n      <- sql"""UPDATE photographers SET name = ${r.name}, profile_url = ${r.profileUrl}
+                      WHERE photographer_id = $id""".update.run
+      result <- if n == 0 then (None: Option[Photographer]).pure[ConnectionIO] else findByIdIO(id)
+    yield result).transact(xa)
 
   def patch(id: Long, p: PhotographerPatch): Task[Option[Photographer]] =
     val sets = List(
@@ -65,17 +67,13 @@ final class LivePhotographerRepository(xa: Transactor[Task]) extends Photographe
       p.profileUrl.map(v => fr"profile_url = $v")
     ).flatten
 
-    if sets.isEmpty then findById(id)
+    if sets.isEmpty then findByIdIO(id).transact(xa)
     else
       val setClause = sets.reduceLeft(_ ++ fr"," ++ _)
-      (fr"UPDATE photographers SET " ++ setClause ++ fr" WHERE photographer_id = $id")
-        .update
-        .run
-        .transact(xa)
-        .flatMap {
-          case 0 => ZIO.succeed(None)
-          case _ => findById(id)
-        }
+      (for
+        n      <- (fr"UPDATE photographers SET " ++ setClause ++ fr" WHERE photographer_id = $id").update.run
+        result <- if n == 0 then (None: Option[Photographer]).pure[ConnectionIO] else findByIdIO(id)
+      yield result).transact(xa)
 
   def delete(id: Long): Task[Boolean] =
     sql"DELETE FROM photographers WHERE photographer_id = $id"

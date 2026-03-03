@@ -10,20 +10,14 @@ import sttp.tapir.generic.auto.*
 import sttp.tapir.ztapir.*
 import zio.*
 
+import ApiSecurity.{securedBase, authenticate}
+
 /** REST endpoints for the /photographers resource, and the nested
   * /photographers/:id/photos convenience route.
   */
 object PhotographerApi:
 
   type Env = AppEnv
-
-  private def authenticate(token: String): ZIO[AuthService, (StatusCode, ErrorResponse), TokenClaims] =
-    AuthService.validateToken(token).mapError(authErrorToHttp)
-
-  private val securedBase =
-    endpoint
-      .securityIn(auth.bearer[String]().description("JWT access token"))
-      .errorOut(statusCode.and(jsonBody[ErrorResponse]))
 
   // ─── Abstract endpoint definitions ────────────────────────────────────────
 
@@ -107,8 +101,7 @@ object PhotographerApi:
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosRead))
                  .mapError(authErrorToHttp)
         q = PhotographerQuery(name = name, page = page.max(1), perPage = perPage.min(100).max(1))
-        (rows, total) <- ZIO.serviceWithZIO[PhotographerRepository](_.findAll(q))
-                             .mapError(throwableToHttp)
+        (rows, total) <- ZIO.serviceWithZIO[PhotographerRepository](_.findAll(q)).mapErrorHttp
       yield PagedResponse(rows, PaginationMeta(total, q.page, q.perPage))
     }
 
@@ -117,8 +110,7 @@ object PhotographerApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosRead))
                  .mapError(authErrorToHttp)
-        r <- ZIO.serviceWithZIO[PhotographerRepository](_.findById(pgId))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotographerRepository](_.findById(pgId)).mapErrorHttp
         p <- ZIO.fromOption(r)
                  .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photographer not found: $pgId"))
       yield p
@@ -130,14 +122,13 @@ object PhotographerApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotosRead))
                  .mapError(authErrorToHttp)
-        exists <- ZIO.serviceWithZIO[PhotographerRepository](_.existsById(pgId))
-                      .mapError(throwableToHttp)
+        exists <- ZIO.serviceWithZIO[PhotographerRepository](_.existsById(pgId)).mapErrorHttp
         _ <- ZIO.unless(exists)(
                  ZIO.fail(StatusCode.NotFound -> ErrorResponse(s"Photographer not found: $pgId"))
                )
         (rows, total) <- ZIO.serviceWithZIO[PhotoRepository](
                              _.findByPhotographerId(pgId, page.max(1), perPage.min(100).max(1))
-                           ).mapError(throwableToHttp)
+                           ).mapErrorHttp
       yield PagedResponse(rows, PaginationMeta(total, page, perPage))
     }
 
@@ -147,8 +138,7 @@ object PhotographerApi:
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotographersWrite))
                  .mapError(authErrorToHttp)
         pg = Photographer(body.photographerId, body.name, body.profileUrl)
-        r <- ZIO.serviceWithZIO[PhotographerRepository](_.create(pg))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotographerRepository](_.create(pg)).mapErrorHttp
       yield r
     }
 
@@ -158,8 +148,7 @@ object PhotographerApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotographersWrite))
                    .mapError(authErrorToHttp)
-        r <- ZIO.serviceWithZIO[PhotographerRepository](_.replace(pgId, body))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotographerRepository](_.replace(pgId, body)).mapErrorHttp
         p <- ZIO.fromOption(r)
                  .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photographer not found: $pgId"))
       yield p
@@ -171,8 +160,7 @@ object PhotographerApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.PhotographersWrite))
                    .mapError(authErrorToHttp)
-        r <- ZIO.serviceWithZIO[PhotographerRepository](_.patch(pgId, body))
-                 .mapError(throwableToHttp)
+        r <- ZIO.serviceWithZIO[PhotographerRepository](_.patch(pgId, body)).mapErrorHttp
         p <- ZIO.fromOption(r)
                  .mapError(_ => StatusCode.NotFound -> ErrorResponse(s"Photographer not found: $pgId"))
       yield p
@@ -183,8 +171,7 @@ object PhotographerApi:
       for
         _ <- ZIO.serviceWithZIO[AuthService](_.requireScope(claims, Scopes.Admin))
                  .mapError(authErrorToHttp)
-        photoCount <- ZIO.serviceWithZIO[PhotoRepository](_.countByPhotographerId(pgId))
-                          .mapError(throwableToHttp)
+        photoCount <- ZIO.serviceWithZIO[PhotoRepository](_.countByPhotographerId(pgId)).mapErrorHttp
         _ <- ZIO.when(photoCount > 0)(
                  ZIO.fail(
                    StatusCode.Conflict -> ErrorResponse(
@@ -193,8 +180,7 @@ object PhotographerApi:
                    )
                  )
                )
-        deleted <- ZIO.serviceWithZIO[PhotographerRepository](_.delete(pgId))
-                       .mapError(throwableToHttp)
+        deleted <- ZIO.serviceWithZIO[PhotographerRepository](_.delete(pgId)).mapErrorHttp
         _ <- ZIO.unless(deleted)(
                  ZIO.fail(StatusCode.NotFound -> ErrorResponse(s"Photographer not found: $pgId"))
                )

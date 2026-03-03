@@ -71,7 +71,8 @@ object PhotoRepositorySpec extends ZIOSpecDefault:
           pexelsUrl    = p.pexelsUrl.getOrElse(existing.pexelsUrl),
           baseImageUrl = p.baseImageUrl.getOrElse(existing.baseImageUrl),
           avgColor     = p.avgColor.getOrElse(existing.avgColor),
-          alt          = p.alt.orElse(existing.alt)
+          // None → unchanged; Some(None) → clear to null; Some(Some(v)) → set v
+          alt          = p.alt.fold(existing.alt)(identity)
         )
         store(id) = updated
         updated
@@ -95,6 +96,8 @@ object PhotoRepositorySpec extends ZIOSpecDefault:
   private val photo2 = Photo(2L, 100L, 1280,  720, "https://pexels.com/2", "https://img.pexels.com/2.jpeg", "#112233", Some("Mountain sunset"))
   private val photo3 = Photo(3L, 200L, 3840, 2160, "https://pexels.com/3", "https://img.pexels.com/3.jpeg", "#AABBCC", None)
 
+  // In ZIO 2, .provide(layer) at test level builds the layer fresh for each test
+  // (each test has its own scope), so no special "fresh" wrapper is needed.
   private val seededLayer: ULayer[PhotoRepository] =
     ZLayer.fromZIO {
       val repo = new InMemoryPhotoRepository

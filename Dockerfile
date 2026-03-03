@@ -25,4 +25,7 @@ COPY --from=builder /build/target/scala-3.4.2/clever-photos-api-assembly-0.1.0.j
 
 EXPOSE 8080
 
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+USER appuser
+
 ENTRYPOINT ["java", "-Xmx512m", "-jar", "app.jar"]

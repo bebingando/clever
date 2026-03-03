@@ -57,6 +57,9 @@ lazy val root = project
       "dev.zio" %% "zio-test"          % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt"      % zioVersion % Test,
       "dev.zio" %% "zio-test-magnolia" % zioVersion % Test,
+      // Tapir stub server for endpoint-pipeline tests (no real HTTP binding)
+      "com.softwaremill.sttp.tapir"   %% "tapir-sttp-stub-server" % tapirVersion % Test,
+      "com.softwaremill.sttp.client3" %% "core"                   % "3.9.7"      % Test,
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Fat-JAR assembly settings

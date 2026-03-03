@@ -3,11 +3,12 @@ package com.clever.photos.api
 import com.clever.photos.config.HttpConfig
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
+import sttp.tapir.ztapir.*
 import zio.*
 import zio.http.*
 
 /** Assembles all Tapir server endpoints into a ZIO-HTTP Routes value,
-  * adds the Swagger UI, and starts the HTTP server.
+  * optionally adds the Swagger UI, and starts the HTTP server.
   *
   * All server endpoints are typed with the shared [[AppEnv]] so the route
   * list is homogeneous — no `asInstanceOf` casts needed.  ZIO's contravariance
@@ -34,18 +35,23 @@ object Server:
     */
   private val swaggerEndpoints: List[ZServerEndpoint[AppEnv, Any]] =
     SwaggerInterpreter()
-      .fromEndpoints[RIO[AppEnv, *]](
+      .fromEndpoints[[A] =>> RIO[AppEnv, A]](
         allAbstractEndpoints,
         "Clever Photos API",
         "1.0.0"
       )
 
   /** Starts the ZIO-HTTP server and blocks until the application shuts down.
+    * Swagger UI is mounted only when `config.swaggerEnabled` is true.
     * `provideSomeLayer[AppEnv]` keeps the business environment in scope and
     * only provides the additional ZIO-HTTP Server layer.
     */
   def start(config: HttpConfig): ZIO[AppEnv & Scope, Throwable, Nothing] =
-    val routes       = ZioHttpInterpreter().toHttp(businessEndpoints ++ swaggerEndpoints)
+    val allEndpoints = if config.swaggerEnabled then
+      businessEndpoints ++ swaggerEndpoints
+    else
+      businessEndpoints
+    val routes       = ZioHttpInterpreter().toHttp(allEndpoints)
     val serverConfig = zio.http.Server.Config.default.binding(config.host, config.port)
     zio.http.Server.serve(routes).provideSomeLayer[AppEnv](
       ZLayer.succeed(serverConfig) >>> zio.http.Server.live

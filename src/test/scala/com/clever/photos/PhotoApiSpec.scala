@@ -4,7 +4,11 @@ import com.clever.photos.api.*
 import com.clever.photos.auth.*
 import com.clever.photos.domain.*
 import com.clever.photos.repository.*
+import sttp.client3.*
+import sttp.client3.testing.SttpBackendStub
 import sttp.model.StatusCode
+import sttp.tapir.server.stub.TapirStubInterpreter
+import sttp.tapir.ztapir.{RIOMonadError, ZServerEndpoint}
 import zio.*
 import zio.json.*
 import zio.test.*
@@ -17,7 +21,7 @@ import zio.test.Assertion.*
   * HTTP port or touching a database.
   *
   * Auth is provided by MockAuthService (all scopes, any non-empty token).
-  * Persistence is provided by the InMemoryPhotoRepository from PhotoRepositorySpec.
+  * Persistence is provided by in-memory repository stubs.
   */
 object PhotoApiSpec extends ZIOSpecDefault:
 
@@ -50,7 +54,7 @@ object PhotoApiSpec extends ZIOSpecDefault:
           pexelsUrl    = p.pexelsUrl.getOrElse(e.pexelsUrl),
           baseImageUrl = p.baseImageUrl.getOrElse(e.baseImageUrl),
           avgColor     = p.avgColor.getOrElse(e.avgColor),
-          alt          = p.alt.orElse(e.alt)
+          alt          = p.alt.fold(e.alt)(identity)
         )
         store(id) = u; u
       }
@@ -82,13 +86,21 @@ object PhotoApiSpec extends ZIOSpecDefault:
     def delete(id: Long): Task[Boolean] = ZIO.succeed(store.remove(id).isDefined)
     def existsById(id: Long): Task[Boolean] = ZIO.succeed(store.contains(id))
 
-  // ─── Shared test environment ────────────────────────────────────────────────
+  private class StubApiClientRepo extends ApiClientRepository:
+    def findById(id: String): Task[Option[ApiClient]] = ZIO.succeed(None)
+    def create(client: ApiClient): Task[ApiClient]    = ZIO.succeed(client)
+    def countAll(): Task[Long]                         = ZIO.succeed(0L)
 
-  private type TestEnv = PhotoRepository & PhotographerRepository & AuthService
+  // ─── Shared test environment ────────────────────────────────────────────────
+  // In ZIO 2, layers provided inline via .provide() at the test level are built
+  // fresh for each test (each test has its own scope), so no ZLayer.fresh needed.
+
+  private type TestEnv = PhotoRepository & PhotographerRepository & ApiClientRepository & AuthService
 
   private val testEnv: ULayer[TestEnv] =
     ZLayer.succeed[PhotoRepository](new InMemoryPhotoRepo) ++
     ZLayer.succeed[PhotographerRepository](new InMemoryPhotographerRepo) ++
+    ZLayer.succeed[ApiClientRepository](new StubApiClientRepo) ++
     MockAuthService.layer
 
   private val samplePhotographer = Photographer(42L, "Alice", "https://pexels.com/@alice")
@@ -100,58 +112,66 @@ object PhotoApiSpec extends ZIOSpecDefault:
     ZIO.serviceWithZIO[PhotographerRepository](_.create(samplePhotographer)) *>
     ZIO.serviceWithZIO[PhotoRepository](_.create(samplePhoto)).unit
 
+  // ─── TapirStubInterpreter backend helper ────────────────────────────────────
+  // No explicit return type to avoid kind-projector `*` syntax — Scala 3 infers it.
+
+  private def backendFor(endpoint: ZServerEndpoint[TestEnv, Any]) =
+    TapirStubInterpreter(SttpBackendStub(new RIOMonadError[TestEnv]))
+      .whenServerEndpointRunLogic(endpoint)
+      .backend()
+
   // ─── Tests ────────────────────────────────────────────────────────────────
 
   def spec = suite("PhotoApiSpec")(
 
-    suite("GET /photos/:id")(
+    suite("GET /photos/:id via endpoint pipeline")(
       test("returns 200 with the photo for a known ID") {
+        val backend = backendFor(PhotoApi.getPhotoServer)
         for
-          _      <- seed
-          found  <- ZIO.serviceWithZIO[PhotoRepository](_.findById(1L))
-        yield assertTrue(found.contains(samplePhoto))
+          _        <- seed
+          response <- basicRequest
+                        .get(uri"http://test/photos/1")
+                        .header("Authorization", "Bearer mock-token")
+                        .send(backend)
+        yield assertTrue(response.code == StatusCode.Ok)
       }.provide(testEnv),
 
-      test("returns None for an unknown ID") {
-        ZIO.serviceWithZIO[PhotoRepository](_.findById(999L))
-          .map(r => assertTrue(r.isEmpty))
+      test("returns 404 for an unknown ID") {
+        val backend = backendFor(PhotoApi.getPhotoServer)
+        basicRequest
+          .get(uri"http://test/photos/9999")
+          .header("Authorization", "Bearer mock-token")
+          .send(backend)
+          .map(r => assertTrue(r.code == StatusCode.NotFound))
           .provide(testEnv)
       }
     ),
 
-    suite("POST /photos — validation")(
-      test("rejects invalid avgColor format") {
-        // Test directly via endpoint server logic (no HTTP binding needed)
-        val claims = TokenClaims("c", Scopes.all)
-        val body   = PhotoCreate(99L, 42L, 100, 100, "u", "b", "bad-color", None)
-        // The validation is in the server logic; we test it via a mock environment
-        ZIO.serviceWithZIO[PhotoRepository] { repo =>
-          // avgColor must match #RRGGBB — "bad-color" should fail
-          ZIO.succeed(assertTrue(!body.avgColor.matches("^#[0-9A-Fa-f]{6}$")))
-        }.provide(testEnv)
+    suite("POST /photos — validation via endpoint pipeline")(
+      test("returns 422 for invalid avgColor format") {
+        val backend = backendFor(PhotoApi.createPhotoServer)
+        val body    = PhotoCreate(99L, 42L, 100, 100, "u", "b", "bad-color", None)
+        basicRequest
+          .post(uri"http://test/photos")
+          .header("Authorization", "Bearer mock-token")
+          .contentType("application/json")
+          .body(body.toJson)
+          .send(backend)
+          .map(r => assertTrue(r.code == StatusCode.UnprocessableEntity))
+          .provide(testEnv)
       },
 
-      test("accepts valid avgColor format") {
-        val body = PhotoCreate(99L, 42L, 100, 100, "u", "b", "#1A2B3C", None)
-        ZIO.succeed(assertTrue(body.avgColor.matches("^#[0-9A-Fa-f]{6}$")))
-      }
-    ),
-
-    suite("pagination logic")(
-      test("perPage clamped to 100") {
-        ZIO.succeed {
-          val perPage = 200
-          val clamped = perPage.min(100).max(1)
-          assertTrue(clamped == 100)
-        }
-      },
-
-      test("page minimum is 1") {
-        ZIO.succeed {
-          val page    = -5
-          val bounded = page.max(1)
-          assertTrue(bounded == 1)
-        }
+      test("returns 201 for a valid photo") {
+        val backend = backendFor(PhotoApi.createPhotoServer)
+        val body    = PhotoCreate(88L, 42L, 800, 600, "https://p.com/88", "https://img.p.com/88.jpg", "#AABBCC", None)
+        basicRequest
+          .post(uri"http://test/photos")
+          .header("Authorization", "Bearer mock-token")
+          .contentType("application/json")
+          .body(body.toJson)
+          .send(backend)
+          .map(r => assertTrue(r.code == StatusCode.Created))
+          .provide(testEnv)
       }
     ),
 
@@ -175,12 +195,42 @@ object PhotoApiSpec extends ZIOSpecDefault:
       }
     ),
 
+    suite("pagination logic")(
+      test("perPage clamped to 100") {
+        ZIO.succeed {
+          val perPage = 200
+          val clamped = perPage.min(100).max(1)
+          assertTrue(clamped == 100)
+        }
+      },
+
+      test("page minimum is 1") {
+        ZIO.succeed {
+          val page    = -5
+          val bounded = page.max(1)
+          assertTrue(bounded == 1)
+        }
+      }
+    ),
+
     suite("delete protection")(
       test("cannot delete photographer when photos exist") {
         for
           _     <- seed
           count <- ZIO.serviceWithZIO[PhotoRepository](_.countByPhotographerId(42L))
-        yield assertTrue(count == 1L) // API would return 409 here
+        yield assertTrue(count == 1L)
       }.provide(testEnv)
+    ),
+
+    suite("PhotoPatch alt semantics")(
+      test("None leaves alt field absent") {
+        assertTrue(PhotoPatch().alt.isEmpty)
+      },
+      test("Some(None) clears alt to null") {
+        assertTrue(PhotoPatch(alt = Some(None)).alt.contains(None))
+      },
+      test("Some(Some(v)) sets alt value") {
+        assertTrue(PhotoPatch(alt = Some(Some("caption"))).alt.contains(Some("caption")))
+      }
     )
   )

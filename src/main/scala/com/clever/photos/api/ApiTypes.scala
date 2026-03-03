@@ -2,7 +2,9 @@ package com.clever.photos.api
 
 import com.clever.photos.auth.{AuthError, AuthService}
 import com.clever.photos.repository.{ApiClientRepository, PhotoRepository, PhotographerRepository}
+import org.postgresql.util.PSQLException
 import sttp.model.StatusCode
+import zio.*
 import zio.json.*
 
 /** Full dependency union for every authenticated endpoint.
@@ -38,7 +40,29 @@ def authErrorToHttp(e: AuthError): (StatusCode, ErrorResponse) = e match
   case AuthError.InvalidToken(msg)        => (StatusCode.Unauthorized, ErrorResponse(msg))
   case AuthError.InsufficientScope(scope) => (StatusCode.Forbidden,    ErrorResponse(s"Required scope: $scope"))
   case AuthError.ClientNotFound(id)       => (StatusCode.Unauthorized, ErrorResponse(s"Client not found: $id"))
+  case AuthError.ServiceUnavailable(_)    => (StatusCode.ServiceUnavailable, ErrorResponse("Service temporarily unavailable"))
+  case AuthError.RateLimitExceeded        => (StatusCode.TooManyRequests, ErrorResponse("Too many authentication attempts. Try again later."))
 
-/** Maps a generic Throwable to HTTP 500. */
-def throwableToHttp(e: Throwable): (StatusCode, ErrorResponse) =
-  (StatusCode.InternalServerError, ErrorResponse(e.getMessage))
+/** Maps a Throwable to an HTTP error, inspecting PSQLException SQL states
+  * for constraint violations and returning a generic message for all other errors
+  * (never exposes internal exception details to callers).
+  */
+def throwableToHttp(e: Throwable): (StatusCode, ErrorResponse) = e match
+  case p: PSQLException => p.getSQLState match
+    case "23503" => (StatusCode.Conflict, ErrorResponse("Referenced resource does not exist"))
+    case "23505" => (StatusCode.Conflict, ErrorResponse("A record with this ID already exists"))
+    case _       => (StatusCode.InternalServerError, ErrorResponse("An internal server error occurred"))
+  case _ => (StatusCode.InternalServerError, ErrorResponse("An internal server error occurred"))
+
+/** Extension method that maps `Throwable` errors to HTTP error pairs,
+  * logging unexpected errors before mapping (constraint violations are expected
+  * and not logged).
+  */
+extension [R, A](zio: ZIO[R, Throwable, A])
+  def mapErrorHttp: ZIO[R, (StatusCode, ErrorResponse), A] =
+    zio
+      .tapError {
+        case _: PSQLException => ZIO.unit  // constraint violations are expected
+        case e => ZIO.logError(s"Unexpected error: ${e.getMessage}")
+      }
+      .mapError(throwableToHttp)

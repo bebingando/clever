@@ -11,7 +11,7 @@ import scala.concurrent.ExecutionContext
 
 object Database:
 
-  /** Creates a scoped HikariCP connection pool.
+  /** Creates a scoped HikariCP connection pool with tuned settings.
     *
     * The pool is closed automatically when the ZIO Scope ends (e.g., when the
     * application shuts down). Pool exhaustion surfaces to callers as a
@@ -28,6 +28,13 @@ object Database:
         connectEC       = ExecutionContext.global
       )
       .toScopedZIO
+      .tap { xa =>
+        ZIO.attempt {
+          xa.kernel.setMinimumIdle(config.minIdle)
+          xa.kernel.setConnectionTimeout(config.connectionTimeoutMs)
+          xa.kernel.setKeepaliveTime(config.keepaliveTimeMs)
+        }
+      }
 
   /** ZLayer that wires DbConfig → Transactor[Task].
     * Scoped so the pool lives exactly as long as the application scope.

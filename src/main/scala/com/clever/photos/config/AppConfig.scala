@@ -7,16 +7,20 @@ import zio.config.typesafe.*
 
 /** HTTP server binding configuration. */
 final case class HttpConfig(
-  host: String,
-  port: Int
+  host:           String,
+  port:           Int,
+  swaggerEnabled: Boolean
 )
 
 /** PostgreSQL connection pool configuration. */
 final case class DbConfig(
-  url:      String,
-  user:     String,
-  password: String,
-  poolSize: Int
+  url:                 String,
+  user:                String,
+  password:            String,
+  poolSize:            Int,
+  minIdle:             Int,
+  connectionTimeoutMs: Long,
+  keepaliveTimeMs:     Long
 )
 
 /** JWT and auth-mode configuration. */

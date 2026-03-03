@@ -20,6 +20,8 @@ services:
       # App user credentials (used by init script to create the role).
       APP_DB_USER:       app_user
       APP_DB_PASSWORD:   ${APP_DB_PASSWORD:-dev_app_password}
+      # Read-only user password — must be set explicitly; no insecure default.
+      READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./pg/init:/docker-entrypoint-initdb.d:ro   # initialisation scripts
@@ -46,8 +48,9 @@ services:
       DB_USER:               app_user
       DB_PASSWORD:           ${APP_DB_PASSWORD:-dev_app_password}
       DB_POOL_SIZE:          "10"
-      JWT_SECRET:            ${JWT_SECRET:-dev-jwt-secret-change-in-production}
-      TOKEN_EXPIRY_SECONDS:  "3600"
+      # JWT_SECRET must be explicitly set — no fallback default.
+      JWT_SECRET:            ${JWT_SECRET}
+      TOKEN_EXPIRY_SECONDS:  "900"
       AUTH_MOCK_MODE:        "false"
       # On first boot, seed the DB with a default API client using these creds.
       DEFAULT_CLIENT_ID:     ${DEFAULT_CLIENT_ID:-dev-client}

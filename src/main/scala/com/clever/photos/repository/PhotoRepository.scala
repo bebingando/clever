@@ -1,7 +1,7 @@
 package com.clever.photos.repository
 
 import com.clever.photos.domain.*
-import cats.syntax.apply.*
+import cats.syntax.applicative.*
 import doobie.*
 import doobie.implicits.*
 import doobie.postgres.implicits.*
@@ -34,15 +34,19 @@ object PhotoRepository:
 /** Live implementation backed by PostgreSQL via Doobie. */
 final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
 
-  import LivePhotoRepository.PhotoRead
+  // ─── Private ConnectionIO helpers (not yet transacted) ──────────────────
 
-  def findById(id: Long): Task[Option[Photo]] =
+  private def findByIdIO(id: Long): ConnectionIO[Option[Photo]] =
     sql"""SELECT id, photographer_id, width, height, pexels_url,
                  base_image_url, avg_color, alt
             FROM photos WHERE id = $id"""
       .query[Photo]
       .option
-      .transact(xa)
+
+  // ─── Public Task methods ─────────────────────────────────────────────────
+
+  def findById(id: Long): Task[Option[Photo]] =
+    findByIdIO(id).transact(xa)
 
   def findAll(q: PhotoQuery): Task[(List[Photo], Long)] =
     val base = fr"""FROM photos WHERE 1=1"""
@@ -54,10 +58,7 @@ final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
       q.minWidth.map(w      => fr"AND width >= $w"),
       q.minHeight.map(h     => fr"AND height >= $h"),
       q.avgColor.map(c      => fr"AND avg_color = $c"),
-      q.alt.map(kw => {
-        val tsQuery = kw.trim.split("\\s+").mkString(" & ")
-        fr"AND to_tsvector('english', coalesce(alt, '')) @@ to_tsquery('english', $tsQuery)"
-      })
+      q.alt.map(kw          => fr"AND to_tsvector('english', coalesce(alt, '')) @@ websearch_to_tsquery('english', $kw)")
     ).flatten
 
     val whereClause = filters.foldLeft(base)(_ ++ _)
@@ -75,7 +76,6 @@ final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
         .query[Long]
         .unique
 
-    // Use a for-comprehension rather than mapN to avoid needing cats.syntax.apply.
     (for { rows <- dataQ; total <- countQ } yield (rows, total)).transact(xa)
 
   def findByPhotographerId(photographerId: Long, page: Int, perPage: Int): Task[(List[Photo], Long)] =
@@ -93,25 +93,25 @@ final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
       .as(photo)
 
   def replace(id: Long, r: PhotoReplace): Task[Option[Photo]] =
-    sql"""UPDATE photos
-            SET photographer_id = ${r.photographerId},
-                width           = ${r.width},
-                height          = ${r.height},
-                pexels_url      = ${r.pexelsUrl},
-                base_image_url  = ${r.baseImageUrl},
-                avg_color       = ${r.avgColor},
-                alt             = ${r.alt}
-          WHERE id = $id"""
-      .update
-      .run
-      .transact(xa)
-      .flatMap {
-        case 0 => ZIO.succeed(None)
-        case _ => findById(id)
-      }
+    (for
+      n      <- sql"""UPDATE photos
+                        SET photographer_id = ${r.photographerId},
+                            width           = ${r.width},
+                            height          = ${r.height},
+                            pexels_url      = ${r.pexelsUrl},
+                            base_image_url  = ${r.baseImageUrl},
+                            avg_color       = ${r.avgColor},
+                            alt             = ${r.alt}
+                      WHERE id = $id""".update.run
+      result <- if n == 0 then (None: Option[Photo]).pure[ConnectionIO] else findByIdIO(id)
+    yield result).transact(xa)
 
   def patch(id: Long, p: PhotoPatch): Task[Option[Photo]] =
-    // Build the SET clause from only the fields that were provided
+    // `p.alt: Option[Option[String]]`:
+    //   None          → skip (do not update field)
+    //   Some(None)    → set to SQL NULL
+    //   Some(Some(v)) → set to v
+    // Doobie's Put[Option[String]] writes NULL for None, value for Some.
     val sets = List(
       p.width.map(v        => fr"width = $v"),
       p.height.map(v       => fr"height = $v"),
@@ -121,17 +121,13 @@ final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
       p.alt.map(v          => fr"alt = $v")
     ).flatten
 
-    if sets.isEmpty then findById(id)
+    if sets.isEmpty then findByIdIO(id).transact(xa)
     else
       val setClause = sets.reduceLeft(_ ++ fr"," ++ _)
-      (fr"UPDATE photos SET " ++ setClause ++ fr" WHERE id = $id")
-        .update
-        .run
-        .transact(xa)
-        .flatMap {
-          case 0 => ZIO.succeed(None)
-          case _ => findById(id)
-        }
+      (for
+        n      <- (fr"UPDATE photos SET " ++ setClause ++ fr" WHERE id = $id").update.run
+        result <- if n == 0 then (None: Option[Photo]).pure[ConnectionIO] else findByIdIO(id)
+      yield result).transact(xa)
 
   def delete(id: Long): Task[Boolean] =
     sql"DELETE FROM photos WHERE id = $id"
