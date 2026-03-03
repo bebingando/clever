@@ -326,6 +326,8 @@ sbt "testOnly com.clever.photos.PhotoApiSpec"
 
 4. **Refresh tokens** — the current access tokens cannot be revoked before expiry. A refresh-token table with rotation-on-use and replay detection would add revocation capability.
 
+5. **More extensive logging** — only core application operations are logged; in the future, business logic could be logged at least at debug level 
+
 ### Medium priority
 
 5. **Prometheus metrics** — `/metrics` with request latency histograms, pool utilisation, and DB query durations.
