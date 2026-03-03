@@ -64,13 +64,16 @@ lazy val root = project
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Fat-JAR assembly settings
     assembly / assemblyMergeStrategy := {
-      case PathList("META-INF", "services", _*) => MergeStrategy.concat
-      case PathList("META-INF", "MANIFEST.MF")  => MergeStrategy.discard
-      case PathList("META-INF", _*)             => MergeStrategy.discard
-      case PathList("module-info.class")         => MergeStrategy.discard
-      case "reference.conf"                      => MergeStrategy.concat
-      case "application.conf"                    => MergeStrategy.concat
-      case _                                     => MergeStrategy.first
+      case PathList("META-INF", "services", _*)   => MergeStrategy.concat
+      // Swagger UI bundles its static assets (HTML/JS/CSS) under
+      // META-INF/resources/webjars — must be kept, not discarded.
+      case PathList("META-INF", "resources", _*)  => MergeStrategy.first
+      case PathList("META-INF", "MANIFEST.MF")    => MergeStrategy.discard
+      case PathList("META-INF", _*)               => MergeStrategy.discard
+      case PathList("module-info.class")           => MergeStrategy.discard
+      case "reference.conf"                        => MergeStrategy.concat
+      case "application.conf"                      => MergeStrategy.concat
+      case _                                       => MergeStrategy.first
     },
     assembly / mainClass := Some("com.clever.photos.Main"),
   )
