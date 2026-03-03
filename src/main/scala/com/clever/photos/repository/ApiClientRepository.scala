@@ -39,8 +39,15 @@ final class LiveApiClientRepository(xa: Transactor[Task]) extends ApiClientRepos
       .transact(xa)
 
 object LiveApiClientRepository:
-  // Doobie maps PostgreSQL text[] ↔ List[String] via the postgres implicits.
-  given Read[ApiClient] = Read.derived
+  // Doobie's postgres implicits provide Get[Array[String]] for text[].
+  // We need an explicit Read[ApiClient] that bridges Array[String] → List[String]
+  // because Read.derived would look for Get[List[String]] which doesn't exist
+  // in the postgres module (only Array variants are provided).
+  given Read[ApiClient] =
+    Read[(String, String, String, Array[String], Boolean)].map {
+      case (clientId, secretHash, name, scopes, isActive) =>
+        ApiClient(clientId, secretHash, name, scopes.toList, isActive)
+    }
 
   val layer: URLayer[Transactor[Task], ApiClientRepository] =
     ZLayer.fromFunction(new LiveApiClientRepository(_))

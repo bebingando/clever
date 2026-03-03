@@ -88,7 +88,8 @@ object PhotoApi:
 
   // ─── Server endpoints (with ZIO logic) ────────────────────────────────────
 
-  type Env = PhotoRepository & PhotographerRepository & AuthService
+  // Use the shared AppEnv so all server endpoints share the same R.
+  type Env = AppEnv
 
   private def authenticate(token: String): ZIO[AuthService, (StatusCode, ErrorResponse), TokenClaims] =
     AuthService.validateToken(token).mapError(authErrorToHttp)

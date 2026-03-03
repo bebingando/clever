@@ -1,8 +1,6 @@
 package com.clever.photos.api
 
-import com.clever.photos.auth.AuthService
 import com.clever.photos.config.HttpConfig
-import com.clever.photos.repository.{ApiClientRepository, PhotoRepository, PhotographerRepository}
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import zio.*
@@ -10,36 +8,45 @@ import zio.http.*
 
 /** Assembles all Tapir server endpoints into a ZIO-HTTP Routes value,
   * adds the Swagger UI, and starts the HTTP server.
+  *
+  * All server endpoints are typed with the shared [[AppEnv]] so the route
+  * list is homogeneous — no `asInstanceOf` casts needed.  ZIO's contravariance
+  * in `R` ensures that endpoint logic using only a subset of services still
+  * type-checks against the full `AppEnv`.
   */
 object Server:
 
-  type AppEnv =
-    PhotoRepository & PhotographerRepository & ApiClientRepository & AuthService
-
-  /** All abstract endpoint definitions — passed to SwaggerInterpreter to
+  /** All abstract endpoint definitions — fed to SwaggerInterpreter to
     * auto-generate the OpenAPI spec and serve the Swagger UI at /docs.
     */
   private val allAbstractEndpoints: List[sttp.tapir.AnyEndpoint] =
     AuthApi.endpoints ++ PhotoApi.endpoints ++ PhotographerApi.endpoints
 
-  /** Swagger UI endpoints (served as static files at /docs). */
-  private val swaggerEndpoints: List[sttp.tapir.server.ServerEndpoint[Any, Task]] =
+  /** Business-logic server endpoints — all typed as ZServerEndpoint[AppEnv, Any]. */
+  private val businessEndpoints: List[ZServerEndpoint[AppEnv, Any]] =
+    AuthApi.serverEndpoints ++
+    PhotoApi.serverEndpoints ++
+    PhotographerApi.serverEndpoints
+
+  /** Swagger UI endpoints (served as static HTML/JS at /docs).
+    * These only use Task (= ZIO[Any, Throwable, *]) which is a subtype of
+    * RIO[AppEnv, *], so they fit naturally in the combined list.
+    */
+  private val swaggerEndpoints: List[ZServerEndpoint[AppEnv, Any]] =
     SwaggerInterpreter()
-      .fromEndpoints[Task](
+      .fromEndpoints[RIO[AppEnv, *]](
         allAbstractEndpoints,
         "Clever Photos API",
         "1.0.0"
       )
 
-  /** Starts the ZIO-HTTP server and blocks until the application shuts down. */
+  /** Starts the ZIO-HTTP server and blocks until the application shuts down.
+    * `provideSomeLayer[AppEnv]` keeps the business environment in scope and
+    * only provides the additional ZIO-HTTP Server layer.
+    */
   def start(config: HttpConfig): ZIO[AppEnv & Scope, Throwable, Nothing] =
-    val authRoutes         = ZioHttpInterpreter().toHttp(AuthApi.serverEndpoints)
-    val photoRoutes        = ZioHttpInterpreter().toHttp(PhotoApi.serverEndpoints)
-    val photographerRoutes = ZioHttpInterpreter().toHttp(PhotographerApi.serverEndpoints)
-    val swaggerRoutes      = ZioHttpInterpreter().toHttp(swaggerEndpoints)
-    val routes             = authRoutes ++ photoRoutes ++ photographerRoutes ++ swaggerRoutes
-    val serverConfig = zio.http.Server.Config.default
-      .binding(config.host, config.port)
+    val routes       = ZioHttpInterpreter().toHttp(businessEndpoints ++ swaggerEndpoints)
+    val serverConfig = zio.http.Server.Config.default.binding(config.host, config.port)
     zio.http.Server.serve(routes).provideSomeLayer[AppEnv](
       ZLayer.succeed(serverConfig) >>> zio.http.Server.live
     )

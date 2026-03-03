@@ -38,7 +38,7 @@ final class LivePhotographerRepository(xa: Transactor[Task]) extends Photographe
 
     val countQ = (fr"SELECT count(*) " ++ where).query[Long].unique
 
-    (dataQ, countQ).mapN((rows, total) => (rows, total)).transact(xa)
+    (for rows <- dataQ; total <- countQ yield (rows, total)).transact(xa)
 
   def create(p: Photographer): Task[Photographer] =
     sql"""INSERT INTO photographers (photographer_id, name, profile_url)
@@ -91,7 +91,7 @@ final class LivePhotographerRepository(xa: Transactor[Task]) extends Photographe
       .transact(xa)
 
 object LivePhotographerRepository:
-  given Read[Photographer] = Read.derived
+  // Doobie auto-derives Read[Photographer]; no explicit given needed.
 
   val layer: URLayer[Transactor[Task], PhotographerRepository] =
     ZLayer.fromFunction(new LivePhotographerRepository(_))

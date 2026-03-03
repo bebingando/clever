@@ -75,7 +75,8 @@ final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
         .query[Long]
         .unique
 
-    (dataQ, countQ).mapN((rows, total) => (rows, total)).transact(xa)
+    // Use a for-comprehension rather than mapN to avoid needing cats.syntax.apply.
+    (for { rows <- dataQ; total <- countQ } yield (rows, total)).transact(xa)
 
   def findByPhotographerId(photographerId: Long, page: Int, perPage: Int): Task[(List[Photo], Long)] =
     findAll(PhotoQuery(photographerId = Some(photographerId), page = page, perPage = perPage))
@@ -152,8 +153,9 @@ final class LivePhotoRepository(xa: Transactor[Task]) extends PhotoRepository:
       .transact(xa)
 
 object LivePhotoRepository:
-  // Doobie derives Read[Photo] automatically from the field types.
-  given PhotoRead: Read[Photo] = Read.derived
+  // Doobie auto-derives Read[Photo] from the ordered field types when
+  // doobie.implicits.* is in scope.  No explicit given is required for
+  // simple case classes whose every field has a Get instance.
 
   val layer: URLayer[Transactor[Task], PhotoRepository] =
     ZLayer.fromFunction(new LivePhotoRepository(_))

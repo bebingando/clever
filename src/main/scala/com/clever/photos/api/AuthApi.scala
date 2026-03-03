@@ -48,7 +48,9 @@ object AuthApi:
       .description("Issue a JWT access token via the OAuth 2.0 Client Credentials flow")
       .tag("Authentication")
 
-  val tokenServerEndpoint: ZServerEndpoint[AuthService, Any] =
+  // Typed with AppEnv so all server endpoints share the same R for the route list assembly.
+  // ZIO's contravariance ensures logic that only uses AuthService still compiles.
+  val tokenServerEndpoint: ZServerEndpoint[AppEnv, Any] =
     tokenEndpoint.zServerLogic { req =>
       if req.grantType != "client_credentials" then
         ZIO.fail(StatusCode.BadRequest -> ErrorResponse("grant_type must be 'client_credentials'"))
@@ -58,5 +60,5 @@ object AuthApi:
           .mapError(authErrorToHttp)
     }
 
-  val endpoints: List[AnyEndpoint]           = List(tokenEndpoint)
-  val serverEndpoints: List[ZServerEndpoint[AuthService, Any]] = List(tokenServerEndpoint)
+  val endpoints: List[AnyEndpoint]                    = List(tokenEndpoint)
+  val serverEndpoints: List[ZServerEndpoint[AppEnv, Any]] = List(tokenServerEndpoint)

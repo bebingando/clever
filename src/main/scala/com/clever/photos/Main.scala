@@ -9,6 +9,7 @@ import com.clever.photos.ingest.CsvIngester
 import com.clever.photos.repository.*
 import org.mindrot.jbcrypt.BCrypt
 import zio.*
+import zio.config.typesafe.TypesafeConfigProvider
 import zio.logging.backend.SLF4J
 
 /** Application entry point.
@@ -24,7 +25,12 @@ import zio.logging.backend.SLF4J
 object Main extends ZIOAppDefault:
 
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
-    Runtime.removeDefaultLoggers >>> SLF4J.slf4j
+    // Load application.conf from the classpath (bundled in the JAR).
+    // TypesafeConfig resolves ${?ENV_VAR} substitutions before ZIO Config
+    // reads the result, so environment-variable overrides work transparently.
+    Runtime.setConfigProvider(
+      TypesafeConfigProvider.fromResourcePath()
+    ) >>> Runtime.removeDefaultLoggers >>> SLF4J.slf4j
 
   override def run: ZIO[ZIOAppArgs & Scope, Any, Any] =
     program.provide(

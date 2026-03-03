@@ -1,8 +1,18 @@
 package com.clever.photos.api
 
-import com.clever.photos.auth.AuthError
+import com.clever.photos.auth.{AuthError, AuthService}
+import com.clever.photos.repository.{ApiClientRepository, PhotoRepository, PhotographerRepository}
 import sttp.model.StatusCode
 import zio.json.*
+
+/** Full dependency union for every authenticated endpoint.
+  *
+  * Defining a single `AppEnv` and annotating all [[sttp.tapir.ztapir.ZServerEndpoint]] values
+  * with it avoids the need for `asInstanceOf` casts when assembling the route list.
+  * ZIO's contravariance in `R` ensures that endpoint logic that uses only a subset
+  * of these services still type-checks: `ZIO[AuthService, E, A] <: ZIO[AppEnv, E, A]`.
+  */
+type AppEnv = PhotoRepository & PhotographerRepository & ApiClientRepository & AuthService
 
 /** Standard error envelope returned for all non-2xx responses. */
 final case class ErrorResponse(message: String)

@@ -15,7 +15,7 @@ import zio.*
   */
 object PhotographerApi:
 
-  type Env = PhotographerRepository & PhotoRepository & AuthService
+  type Env = AppEnv
 
   private def authenticate(token: String): ZIO[AuthService, (StatusCode, ErrorResponse), TokenClaims] =
     AuthService.validateToken(token).mapError(authErrorToHttp)
