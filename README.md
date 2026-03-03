@@ -30,9 +30,10 @@ The dataset is a well-defined 1:N relationship (photographers → photos) with a
 |---|---|---|
 | `photos.id` (PK) | B-tree | `GET/PUT/PATCH/DELETE /photos/:id` |
 | `photos.photographer_id` | B-tree | `GET /photographers/:id/photos`, FK lookups |
-| `photographers.name` | B-tree | Future name-search endpoint |
+| `photographers.name` | GIN (pg_trgm) | `GET /photographers?name=…` ILIKE search |
 | `photos.alt` | GIN (tsvector) | `GET /photos?alt=keyword` full-text search |
-| `photos.(width, height)` | B-tree composite | `GET /photos?min_width=...&min_height=...` |
+| `photos.width` | B-tree | `GET /photos?width=…&min_width=…` |
+| `photos.height` | B-tree | `GET /photos?height=…&min_height=…` |
 
 ### Application: Scala 3 + ZIO 2
 
@@ -52,7 +53,7 @@ Tapir defines endpoints as **typed values** rather than routes. This means the O
 ### Database Access: Doobie
 
 - SQL is explicit — no ORM magic hiding N+1 queries.
-- Full-text search (`to_tsvector`/`to_tsquery`) is trivial in raw SQL; mapping it through an ORM is awkward.
+- Full-text search (`to_tsvector`/`websearch_to_tsquery`) is trivial in raw SQL; mapping it through an ORM is awkward.
 - Works naturally with ZIO via `zio-interop-cats`.
 
 ### Authentication: JWT via OAuth 2.0 Client Credentials Flow
@@ -60,7 +61,7 @@ Tapir defines endpoints as **typed values** rather than routes. This means the O
 This is a B2B/M2M API with no human users assumed. The Client Credentials flow is the standard choice:
 
 1. A machine client POSTs its `client_id` and `client_secret` to `POST /auth/token`.
-2. The server returns a short-lived JWT (1 hour by default).
+2. The server returns a short-lived JWT (15 minutes by default).
 3. All subsequent requests carry `Authorization: Bearer <token>`.
 
 **Why JWT over opaque tokens?** JWTs are stateless — the server verifies the signature without a DB lookup on every request. This matters for throughput at scale.
@@ -107,7 +108,7 @@ This is a B2B/M2M API with no human users assumed. The Client Credentials flow i
 
 - ⬜ Read-only PostgreSQL replica
 - ⬜ TLS on the PostgreSQL connection
-- ⬜ Rate limiting
+- ✅ Rate limiting on `POST /auth/token` (in-memory; 5 failed attempts per client per 5 minutes)
 - ⬜ Kubernetes manifests
 
 ---
@@ -151,6 +152,8 @@ INFO  c.c.p.Main - Starting server on 0.0.0.0:8080
 3. The 10-photo CSV dataset is ingested.
 4. The HTTP server starts on port 8080.
 
+> **Note:** First boot now runs migrations V1–V5. V5 adds a `TEXT` + `CHECK` constraint on `avg_color`, a pg_trgm GIN index on `photographers.name`, and splits the composite dimensions index into two single-column indexes.
+
 ### Get an access token
 
 ```bash
@@ -168,7 +171,7 @@ Response:
 {
   "accessToken": "eyJ...",
   "tokenType":   "Bearer",
-  "expiresIn":   3600,
+  "expiresIn":   900,
   "scope":       "photos:read photos:write photos:delete photographers:write admin"
 }
 ```
@@ -290,7 +293,7 @@ sbt "testOnly com.clever.photos.PhotoApiSpec"
 
 1. **Integration tests with Testcontainers** — spin up a real PostgreSQL instance per test run and exercise the actual Doobie queries and GIN index behaviour. The in-memory stubs cannot catch SQL bugs.
 
-2. **Rate limiting** — apply per-IP and per-client limits, with stricter limits on `?alt=` (GIN queries are more expensive than PK lookups).
+2. **Rate limiting (extended)** — the auth endpoint already has a basic in-memory rate limiter (5 failed attempts per `client_id` in 5 minutes, single-instance only). What remains: per-IP limits, a Redis-backed distributed limiter for multi-instance deployments, and throttling on `?alt=` queries (GIN lookups are more expensive than PK lookups).
 
 3. **TLS on PostgreSQL** — use `hostssl` in `pg_hba.conf`. Currently omitted because both services run on the same Docker network, but mandatory for cross-host deployments.
 
@@ -322,7 +325,7 @@ sbt "testOnly com.clever.photos.PhotoApiSpec"
 
 3. **No photographer ownership of photos.** This is a B2B/M2M API. Any client with `photos:write` scope can modify any photo. Adding ownership would require a `users` → `photographers` link and a human auth flow, which is out of scope for M2M.
 
-4. **`avg_color` format is validated by the API, not the DB.** The `CHAR(7)` column silently accepts any 7-character string; validation is enforced in the application with a regex.
+4. **`avg_color` format is validated at both the API and DB layers.** The column is `TEXT` with a `CHECK (avg_color ~* '^#[0-9A-Fa-f]{6}$')` constraint (added in V5). The application also validates the format via regex before hitting the database, so callers receive a clean 422 rather than a constraint violation error.
 
 5. **The CSV ingest is a one-time operation.** It runs only when the `photos` table is empty. Subsequent restarts skip it.
 
