@@ -1,7 +1,7 @@
 val scala3Version = "3.4.2"
 
 val zioVersion            = "2.1.9"
-val zioHttpVersion        = "3.0.1"
+val zioHttpVersion        = "3.0.0-RC8"  // must match tapir-zio-http-server 1.11.1's compile target
 val zioJsonVersion        = "0.7.3"
 val zioConfigVersion      = "4.0.2"
 val zioInteropCatsVersion = "23.1.0.2"

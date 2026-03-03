@@ -29,28 +29,19 @@ object Server:
     PhotoApi.serverEndpoints ++
     PhotographerApi.serverEndpoints
 
-  /** Swagger UI endpoints (served as static HTML/JS at /docs).
-    * These only use Task (= ZIO[Any, Throwable, *]) which is a subtype of
-    * RIO[AppEnv, *], so they fit naturally in the combined list.
-    */
-  private val swaggerEndpoints: List[ZServerEndpoint[AppEnv, Any]] =
-    SwaggerInterpreter()
-      .fromEndpoints[[A] =>> RIO[AppEnv, A]](
-        allAbstractEndpoints,
-        "Clever Photos API",
-        "1.0.0"
-      )
+  // Swagger UI endpoints — commented out temporarily while resolving
+  // sbt-assembly META-INF/resources packaging for tapir-swagger-ui-bundle.
+  // private val swaggerEndpoints: List[ZServerEndpoint[AppEnv, Any]] =
+  //   SwaggerInterpreter()
+  //     .fromEndpoints[[A] =>> RIO[AppEnv, A]](
+  //       allAbstractEndpoints,
+  //       "Clever Photos API",
+  //       "1.0.0"
+  //     )
 
-  /** Starts the ZIO-HTTP server and blocks until the application shuts down.
-    * Swagger UI is mounted only when `config.swaggerEnabled` is true.
-    * `provideSomeLayer[AppEnv]` keeps the business environment in scope and
-    * only provides the additional ZIO-HTTP Server layer.
-    */
+  /** Starts the ZIO-HTTP server and blocks until the application shuts down. */
   def start(config: HttpConfig): ZIO[AppEnv & Scope, Throwable, Nothing] =
-    val allEndpoints = if config.swaggerEnabled then
-      businessEndpoints ++ swaggerEndpoints
-    else
-      businessEndpoints
+    val allEndpoints = businessEndpoints
     val routes       = ZioHttpInterpreter().toHttp(allEndpoints)
     val serverConfig = zio.http.Server.Config.default.binding(config.host, config.port)
     zio.http.Server.serve(routes).provideSomeLayer[AppEnv](

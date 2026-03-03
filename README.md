@@ -94,7 +94,7 @@ This is a B2B/M2M API with no human users assumed. The Client Credentials flow i
 - ✅ JWT / OAuth 2.0 Client Credentials authentication
 - ✅ Scope-based authorisation
 - ✅ Mockable/injectable auth service
-- ✅ Swagger UI served at `/docs` (auto-generated from endpoint definitions)
+- ⬜ Swagger UI served at `/docs` (auto-generated from endpoint definitions)
 - ✅ Correct HTTP status codes (200, 201, 204, 400, 401, 403, 404, 409, 422, 500)
 - ✅ `409 Conflict` with clear message when deleting a photographer with existing photos
 - ✅ `avgColor` format validation (`^#[0-9A-Fa-f]{6}$`)
@@ -193,11 +193,38 @@ curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/photos/21751820
 # Photos by photographer
 curl -s -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8080/photographers/57767809/photos" | jq .
+
+# Create a photographer
+curl -s -X POST "http://localhost:8080/photographers" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "photographerId": 12345,
+    "name":           "Jane Smith",
+    "profileUrl":     "https://www.pexels.com/@jane-smith"
+  }' | jq .
+
+# Create a photo (photographerId must exist)
+curl -s -X POST "http://localhost:8080/photos" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id":             99999,
+    "photographerId": 12345,
+    "width":          3840,
+    "height":         2160,
+    "pexelsUrl":      "https://www.pexels.com/photo/99999",
+    "baseImageUrl":   "https://images.pexels.com/photos/99999/photo.jpeg",
+    "avgColor":       "#A3B8C2",
+    "alt":            "Aerial view of a coastal town at sunset"
+  }' | jq .
 ```
 
 ### Swagger UI
 
-Open **http://localhost:8080/docs** in a browser for interactive documentation.
+~~Open **http://localhost:8080/docs** in a browser for interactive documentation.~~
+
+Edit: Serving Swagger resources is disabled due to a bug in sbt assembly directive
 
 ---
 
