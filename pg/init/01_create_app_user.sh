@@ -9,7 +9,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 
     -- Grant connection access
     GRANT CONNECT ON DATABASE photos_db TO app_user;
-    GRANT USAGE   ON SCHEMA public     TO app_user;
+    -- USAGE + CREATE required: PostgreSQL 15+ removed the default CREATE grant
+    -- on the public schema. Flyway (running as app_user) needs CREATE to build
+    -- the schema history table and run migrations.
+    GRANT USAGE, CREATE ON SCHEMA public TO app_user;
 
     -- Row-level DML only — no DDL, no superuser
     GRANT SELECT, INSERT, UPDATE, DELETE
