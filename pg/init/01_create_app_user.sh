@@ -4,6 +4,10 @@
 set -e
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    -- Install pg_trgm here (as superuser) so that Flyway (which runs as app_user,
+    -- a non-superuser) does not need CREATE privilege on the database.
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
     -- Create the app role with login (password injected from env)
     CREATE ROLE app_user WITH LOGIN PASSWORD '${APP_DB_PASSWORD}';
 
