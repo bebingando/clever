@@ -1,0 +1,65 @@
+version: "3.9"
+
+# All services communicate on a private bridge network.
+# Port 5432 is NOT published to the host, so PostgreSQL is
+# unreachable from outside the Docker network.
+networks:
+  backend:
+    driver: bridge
+
+services:
+  # ─── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       photos_db
+      POSTGRES_USER:     postgres
+      # Inject the superuser password from .env or Docker secrets — never hardcode.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_superuser_password}
+      # App user credentials (used by init script to create the role).
+      APP_DB_USER:       app_user
+      APP_DB_PASSWORD:   ${APP_DB_PASSWORD:-dev_app_password}
+      # Read-only user password — must be set explicitly; no insecure default.
+      READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./pg/init:/docker-entrypoint-initdb.d:ro   # initialisation scripts
+      - ./pg/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    expose:
+      - "5432"     # reachable within the backend network only
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d photos_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── API Application ─────────────────────────────────────────────────────────
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL:                jdbc:postgresql://db:5432/photos_db
+      DB_USER:               app_user
+      DB_PASSWORD:           ${APP_DB_PASSWORD:-dev_app_password}
+      DB_POOL_SIZE:          "10"
+      # JWT_SECRET must be explicitly set — no fallback default.
+      JWT_SECRET:            ${JWT_SECRET}
+      TOKEN_EXPIRY_SECONDS:  "900"
+      AUTH_MOCK_MODE:        "false"
+      # On first boot, seed the DB with a default API client using these creds.
+      DEFAULT_CLIENT_ID:     ${DEFAULT_CLIENT_ID:-dev-client}
+      DEFAULT_CLIENT_SECRET: ${DEFAULT_CLIENT_SECRET:-dev-secret-change-me}
+      HTTP_PORT:             "8080"
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
